@@ -1,0 +1,3 @@
+*.py text eol=lf
+*.md text eol=lf
+wsl/robotworld-isaac text eol=lf

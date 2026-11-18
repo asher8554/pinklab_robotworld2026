@@ -53,6 +53,16 @@ def main():
     p.update_state(0.02, q, np.zeros(len(q)))
     p.integrate_odom(0.01)
     assert abs(p.odom[2] - 2 * 0.5 * 0.0825 / 0.4288) < 1e-9
+    # PhysX wraps continuous joints: 6.2 -> -6.2 rad is +0.083 rad of real rotation, not -12.4
+    yaw0, x0 = p.odom[2], p.odom[0]
+    q[0], q[1] = 6.2, 6.2
+    p.update_state(0.025, q, np.zeros(len(q)))
+    p.integrate_odom(0.01)
+    q[0] = q[1] = 6.2 + 2 * 0.0415 - 2 * math.pi
+    p.update_state(0.026, q, np.zeros(len(q)))
+    x1 = p.odom[0]
+    p.integrate_odom(0.01)
+    assert abs((p.odom[0] - x1) * math.cos(0) - 2 * 0.0415 * 0.0825 * math.cos(p.odom[2])) < 1e-6 or abs(math.hypot(p.odom[0] - x1, 0) - 2 * 0.0415 * 0.0825) < 1e-3
     # leaving the drive pose blocks driving
     q[DOFS.index("openarm_left_joint4")] = 0.5
     p.update_state(0.03, q, np.zeros(len(q)))

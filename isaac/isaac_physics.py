@@ -117,7 +117,9 @@ class IsaacPhysics:
         if self._wheel_q is None:
             self._wheel_q = wq.copy()
             return
-        dl, dr = (wq - self._wheel_q) * self.radius
+        # PhysX 는 연속 관절 각도를 ±2π 안으로 감아서 준다 (MuJoCo 는 계속 늘어난다). 한 스텝 차이를 -π..π 로 편다.
+        dq = (wq - self._wheel_q + math.pi) % (2 * math.pi) - math.pi
+        dl, dr = dq * self.radius
         self._wheel_q = wq.copy()
         ds, da = (dl + dr) / 2, (dr - dl) / self.track
         theta = self.odom[2] + da / 2

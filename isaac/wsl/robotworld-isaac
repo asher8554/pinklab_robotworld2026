@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Isaac Sim(Windows)과 함께 쓰는 WSL 쪽 실행 래퍼: 내보내기 · ROS 2 스택(Nav2 · MoveIt · 스킬) · 명령줄 도구
+#   isaac/wsl/robotworld-isaac {export|start|nav|drive|slam|moveit|goal|arm|pick|teleop|fms|exec|env|stop}
+# MuJoCo 실습의 scripts/robotworld 와 같은 명령을 쓰되, 통신을 Windows 의 Isaac Sim 과 맞춘다.
+#   ROS_DOMAIN_ID 45 (MuJoCo 실습 44 · 강좌 43 과 섞이지 않음), Fast DDS, localhost 제한 없음 (Windows ↔ WSL)
+set -e
+ISAAC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(dirname "$ISAAC_DIR")"
+# 빌드된 워크스페이스: 이 저장소에 install/ · .venv 가 있으면 그것, 없으면 ROBOTWORLD_WS (기본 ~/pinklab_robotworld2026).
+# Windows 폴더(/mnt/...)의 이 파일을 WSL 에 빌드해 둔 클론과 함께 쓸 수 있게 하려는 것이다.
+if [[ -f "$REPO/install/local_setup.bash" && -d "$REPO/.venv" ]]; then WS="$REPO"; else WS="${ROBOTWORLD_WS:-$HOME/pinklab_robotworld2026}"; fi
+[[ -f "$WS/install/local_setup.bash" && -f "$WS/.venv/bin/activate" ]] || {
+  echo "빌드된 워크스페이스가 없다: $WS (먼저 ./scripts/install.sh, 또는 ROBOTWORLD_WS=<빌드한 저장소>)" >&2; exit 1; }
+if [[ "${ROS_DISTRO:-}" != jazzy ]]; then set +e; source /opt/ros/jazzy/setup.bash; set -e; fi
+[[ "${VIRTUAL_ENV:-}" == "$WS/.venv" ]] || source "$WS/.venv/bin/activate"
+set +u; source "$WS/install/local_setup.bash"; set -e
+export ROS_DOMAIN_ID="${ROBOTWORLD_ISAAC_DOMAIN_ID:-45}" RMW_IMPLEMENTATION=rmw_fastrtps_cpp ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+unset ROS_LOCALHOST_ONLY ROS_STATIC_PEERS CYCLONEDDS_URI
+export ROS_HOME="$WS/.ros/robotworld_isaac" ROS_LOG_DIR="$WS/.ros/robotworld_isaac/log" PYTHONNOUSERSITE=1
+export ROBOTWORLD_ISAAC_RUN="${ROBOTWORLD_ISAAC_RUN:-$HOME/.cache/robotworld_isaac/run}"
+mkdir -p "$ROS_LOG_DIR" "$ROBOTWORLD_ISAAC_RUN"
+EXPORT="${ROBOTWORLD_ISAAC_EXPORT:-$REPO/artifacts/isaac}"
+PY="$(command -v python3)"; ROS2="$(command -v ros2)"
+LAUNCH="$ISAAC_DIR/wsl/booth_isaac.launch.py"
+command="${1:-start}"; [[ $# -gt 0 ]] && shift
+case "$command" in
+  export) exec "$PY" "$ISAAC_DIR/export_assets.py" --out "$EXPORT" "$@";;
+  start|nav) exec "$PY" "$ROS2" launch "$LAUNCH" mode:=nav "$@";;
+  drive) exec "$PY" "$ROS2" launch "$LAUNCH" mode:=drive moveit:=false "$@";;
+  slam) exec "$PY" "$ROS2" launch "$LAUNCH" mode:=slam moveit:=false "$@";;
+  moveit) exec "$PY" "$ROS2" launch "$LAUNCH" mode:=drive moveit:=true "$@";;
+  goal) exec "$PY" "$ROS2" run mobile_openarm_navigation goal "$@";;
+  arm) exec "$PY" "$ROS2" run mobile_openarm_moveit_config joint_goal "$@";;
+  pick) exec "$PY" "$ROS2" run warehouse_skills pick_place "$@";;
+  teleop) exec "$PY" "$ROS2" run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p speed:=0.25 -p turn:=0.5 "$@";;
+  fms) exec "$PY" "$REPO/fms/server.py" "$@";;
+  exec) exec "$@";;
+  env) echo "workspace $WS | export $EXPORT | domain $ROS_DOMAIN_ID | rmw $RMW_IMPLEMENTATION | python $PY";;
+  stop) # 이 래퍼가 띄운 launch 만 끈다 (MuJoCo 실습 · 다른 세션의 프로세스는 건드리지 않는다). 경로의 + · 공백은 정규식으로 이스케이프
+    esc() { printf '%s' "$1" | sed 's/[][\\.*^$+?(){}|]/\\&/g'; }
+    pkill -INT -f -- "$(esc "launch $LAUNCH")" || true; sleep 3; pkill -f -- "$(esc "$ISAAC_DIR/wsl/vision_bridge.py")" || true;;
+  *) echo "Usage: robotworld-isaac {export|start|nav|drive|slam|moveit|goal|arm|pick|teleop|fms|exec|env|stop}" >&2; exit 2;;
+esac

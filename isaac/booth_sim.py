@@ -159,6 +159,9 @@ def convert():
     ARM_J, FINGER1, FINGER2, WHEEL = r".*openarm_(left|right)_joint[1-7]$", r".*_finger_joint1$", r".*_finger_joint2$", r".*_wheel_joint$"
     robot = URDFImporter(URDFImporterConfig(
         urdf_path=str(EXPORT / "robot.urdf"), usd_path=str(EXPORT / "usd/robot"), ros_package_paths=packages,
+        # 이동 로봇: URDF 루트 base_footprint 는 질량이 없어 강체가 아니고, base_footprint → base_link 고정 조인트가
+        # PhysX 에서는 "월드에 고정" 이 된다 (바퀴만 헛돈다). fix_base=False 가 이 조인트를 없애 떠 있는 베이스로 만든다.
+        fix_base=False,
         joint_drive_type="force",
         joint_target_type={ARM_J: "position", FINGER1: "position", FINGER2: "none", WHEEL: "velocity"},
         override_joint_stiffness={ARM_J: float(arm["kp"]), FINGER1: float(grip["kp"]), WHEEL: 0.0},
@@ -243,6 +246,8 @@ def material(name, mu, combine="average"):
     api.CreateStaticFrictionAttr(mu)
     api.CreateDynamicFrictionAttr(mu)
     api.CreateRestitutionAttr(0.0)
+    # 결합 방식은 PhysxMaterialAPI 스키마가 적용돼야 PhysX 가 읽는다 (속성만 있으면 기본 average 로 계산된다)
+    mat.GetPrim().AddAppliedSchema("PhysxMaterialAPI")
     mat.GetPrim().CreateAttribute("physxMaterial:frictionCombineMode", Sdf.ValueTypeNames.Token).Set(combine)
     return mat
 
@@ -256,11 +261,27 @@ def bind(path, mat):
     return count
 
 
-caster, wheel, finger, cup = material("caster", 0.0, "min"), material("wheel", 1.0), material("finger", 1.5, "max"), material("cup", 1.2)
+caster, wheel, finger, cup = material("caster", 0.0, "min"), material("wheel", 1.2, "max"), material("finger", 1.5, "max"), material("cup", 1.2)
+
+
+def round_wheel(path):
+    """바퀴 원기둥 충돌체를 같은 반지름의 구로 바꾼다. PhysX 는 원기둥을 다각형으로 근사해 반지름이 줄고 바퀴가 캐스터보다 떠서
+    헛돈다. MuJoCo 빌드도 같은 이유로 바퀴 접촉을 타원체로 바꾼다 (mujoco.yaml motors.contact_shape)."""
+    for prim in list(Usd.PrimRange(stage.GetPrimAtPath(path))):
+        if prim.HasAPI(UsdPhysics.CollisionAPI):
+            UsdPhysics.CollisionAPI(prim).CreateCollisionEnabledAttr(False)
+    sphere = UsdGeom.Sphere.Define(stage, f"{path}/round_contact")
+    sphere.CreateRadiusAttr(float(SIM["wheel"]["radius"]))
+    sphere.CreatePurposeAttr(UsdGeom.Tokens.guide)                       # 보이지 않는 충돌 전용
+    UsdPhysics.CollisionAPI.Apply(sphere.GetPrim())
+    return sphere.GetPath().pathString
+
+
 for name, path in ROBOT_PRIMS.items():
     if name.endswith("_caster"):
-        bind(path, caster)          # 캐스터는 고정 링크라서 마찰이 있으면 회전을 막는다 (MuJoCo 는 바퀴 접촉만 본다)
+        bind(path, caster)          # 캐스터: MuJoCo 처럼 거의 마찰 없이 (friction 0.002) 미끄러진다
     elif name in ("left_wheel", "right_wheel"):
+        round_wheel(path)
         bind(path, wheel)
     elif name.endswith("_finger"):
         bind(path, finger)
@@ -473,7 +494,7 @@ def on_physics_step(dt, _context):
             for a, d in ACT_FINGER:
                 efforts[a] = f[d]
         physics.update_state(t, q, v, efforts)
-        if args.debug and t <= 5.0 and (int(t * 10) != int((t - dt) * 10) or t < 2.5 * dt):
+        if args.debug and ((t <= 5.0 and int(t * 10) != int((t - dt) * 10)) or int(t) != int(t - dt) or t < 2.5 * dt):
             pos, quat = (a.numpy()[0] for a in robot.get_world_poses())
             k = int(np.nanargmax(np.abs(v))) if np.any(np.isfinite(v)) else 0
             err = np.abs(q[POS_IDX] - physics.position_targets())
