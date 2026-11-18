@@ -141,12 +141,16 @@ def resolve_spawn(text):
 
 
 # ------------------------------------------------------------------ 1. URDF · MJCF → USD (한 번 변환해 두고 다시 쓴다)
+IMPORT_VERSION = "2"   # 아래 변환 설정을 바꾸면 올린다 (그러면 저장된 USD 를 다시 만든다)
+
+
 def convert():
     record = EXPORT / "usd/import.json"
     sources = [EXPORT / "robot.urdf", EXPORT / "world/booth_world.xml"]
+    key = json.dumps([IMPORT_VERSION, SETTINGS["arm"], SETTINGS["gripper"], SETTINGS["motors"]], sort_keys=True)
     if record.exists() and not args.reimport and record.stat().st_mtime > max(s.stat().st_mtime for s in sources):
         paths = json.loads(record.read_text())
-        if all(Path(p).exists() for p in paths.values()):
+        if paths.pop("key", None) == key and all(Path(p).exists() for p in paths.values()):
             return paths
     for sub in ("robot", "world"):
         shutil.rmtree(EXPORT / "usd" / sub, ignore_errors=True)
@@ -154,23 +158,23 @@ def convert():
     packages = [{"name": n, "path": str(REPO / "src" / n)} for n in SIM["packages"]]
     # 구동기는 변환할 때 만든다 (URDF 에는 게인이 없어서 그냥 변환하면 관절에 구동기가 없다).
     # MuJoCo 와 같은 값: 팔 position kp · kv, 손가락 joint1 position (gripper kp · kv), 바퀴 velocity (motors.velocity_gain).
-    # 손가락 joint2 는 mimic 이라 구동기를 두지 않는다. 단위는 SI (Nm/rad, N/m).
+    # 손가락 joint2 는 URDF 에서 mimic 이지만 PhysX 가 mimic 을 적용하지 않으므로 joint1 과 같은 구동기를 둔다. 단위는 SI (Nm/rad, N/m).
     arm, grip, motor = SETTINGS["arm"], SETTINGS["gripper"], SETTINGS["motors"]
-    ARM_J, FINGER1, FINGER2, WHEEL = r".*openarm_(left|right)_joint[1-7]$", r".*_finger_joint1$", r".*_finger_joint2$", r".*_wheel_joint$"
+    ARM_J, FINGER, WHEEL = r".*openarm_(left|right)_joint[1-7]$", r".*_finger_joint[12]$", r".*_wheel_joint$"
     robot = URDFImporter(URDFImporterConfig(
         urdf_path=str(EXPORT / "robot.urdf"), usd_path=str(EXPORT / "usd/robot"), ros_package_paths=packages,
         # 이동 로봇: URDF 루트 base_footprint 는 질량이 없어 강체가 아니고, base_footprint → base_link 고정 조인트가
         # PhysX 에서는 "월드에 고정" 이 된다 (바퀴만 헛돈다). fix_base=False 가 이 조인트를 없애 떠 있는 베이스로 만든다.
         fix_base=False,
         joint_drive_type="force",
-        joint_target_type={ARM_J: "position", FINGER1: "position", FINGER2: "none", WHEEL: "velocity"},
-        override_joint_stiffness={ARM_J: float(arm["kp"]), FINGER1: float(grip["kp"]), WHEEL: 0.0},
-        override_joint_damping={ARM_J: float(arm["kv"]), FINGER1: float(grip["kv"]), WHEEL: float(motor["velocity_gain"])},
+        joint_target_type={ARM_J: "position", FINGER: "position", WHEEL: "velocity"},
+        override_joint_stiffness={ARM_J: float(arm["kp"]), FINGER: float(grip["kp"]), WHEEL: 0.0},
+        override_joint_damping={ARM_J: float(arm["kv"]), FINGER: float(grip["kv"]), WHEEL: float(motor["velocity_gain"])},
     )).import_urdf()
     world = MJCFImporter(MJCFImporterConfig(mjcf_path=str(EXPORT / "world/booth_world.xml"), usd_path=str(EXPORT / "usd/world"),
                                             import_scene=False)).import_mjcf()
     paths = {"robot": robot, "world": world}
-    record.write_text(json.dumps(paths, indent=1))
+    record.write_text(json.dumps({**paths, "key": key}, indent=1))
     say(f"converted URDF + MJCF to USD in {time.time() - t0:.0f} s")
     return paths
 
@@ -588,6 +592,7 @@ callback_id = SimulationManager.register_callback(on_physics_step, IsaacEvents.P
 for _ in range(3):
     simulation_app.update()
 state["z0"] = float(state["T_w_bl"][2, 3])
+CUPS0 = cups_view.get_world_poses()[0].numpy().copy() if cups_view is not None else None
 say(f"ready | domain {os.environ['ROS_DOMAIN_ID']} | spawn {SPAWN} | {len(DOF)} dofs | cameras {CAMERAS or 'none'} | aruco {MARKERS_DRAWN} | "
     f"physics {args.physics_hz:g} Hz | actions left/right_joint_trajectory_controller, left/right_gripper_controller")
 
@@ -623,6 +628,10 @@ if args.seconds:
         ("arms hold a drive pose", physics.transport_ready(), "transport_ready"),
         ("camera images", not CAMERAS or state["count"]["img"] > 0, f"{state['count']['img']} images"),
     ]
+    if cups_view is not None:
+        moved = np.linalg.norm(cups_view.get_world_poses()[0].numpy() - CUPS0, axis=1)
+        checks.append(("cups stay on the drinks stand", bool(np.all(moved < 0.01)),
+                       ", ".join(f"{c} {m * 100:.1f} cm" for c, m in zip(CUPS, moved))))
     for name, ok, detail in checks:
         print(f"CHECK {'PASS' if ok else 'FAIL'} | {name} | {detail}", flush=True)
     qf = robot.get_dof_positions().numpy()[0]

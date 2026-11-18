@@ -38,8 +38,9 @@ class IsaacPhysics:
         self.settings = sim["settings"]
         self.dof_names = list(dof_names)
         self.index = {n: i for i, n in enumerate(self.dof_names)}
-        # 위치 제어 관절 = 팔 + 손가락 joint1. joint2 는 mimic(joint1 을 따라감)이라 구동하지 않는다 (MuJoCo 도 equality 로만 묶는다)
-        self.position_names = [n for n in self.dof_names if "wheel" not in n and "finger_joint2" not in n]
+        # 위치 제어 관절 = 팔 + 손가락. PhysX 는 URDF mimic(Newton 속성)을 적용하지 않아 joint2 가 풀려 있으므로 joint1 과 같은
+        # 목표로 따로 구동한다 (MuJoCo 는 equality 로 묶는다). 액추에이터(Controllers 가 보는 것)는 joint1 에만 있다.
+        self.position_names = [n for n in self.dof_names if "wheel" not in n]
         self.wheel_names = ["left_wheel_joint", "right_wheel_joint"]
         # MuJoCo 처럼 mimic 이 아닌 관절에만 액추에이터가 있다 (finger_joint2 제외)
         self.actuators = [n + "_position" for n in self.position_names if "finger_joint2" not in n]
@@ -98,7 +99,7 @@ class IsaacPhysics:
 
     def finger_max_efforts(self):
         """Controllers 가 GripperCommand 의 max_effort 로 바꾼 손가락 힘 한계 [N], position_names 중 손가락 순서."""
-        return [float(self.model.actuator_forcerange[self.model.actuator(n + "_position").id][1])
+        return [float(self.model.actuator_forcerange[self.model.actuator(n.replace("joint2", "joint1") + "_position").id][1])
                 for n in self.position_names if "finger" in n]
 
     def wheel_targets(self, linear, angular, dt):

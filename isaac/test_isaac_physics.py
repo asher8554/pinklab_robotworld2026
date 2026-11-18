@@ -67,8 +67,10 @@ def main():
     q[DOFS.index("openarm_left_joint4")] = 0.5
     p.update_state(0.03, q, np.zeros(len(q)))
     assert not p.transport_ready()
-    assert p.finger_max_efforts() == [30.0] * 2
-    assert not any("finger_joint2" in n for n in p.position_names), "mimic finger is not driven"
+    assert p.finger_max_efforts() == [30.0] * 4, "both fingers share the joint1 actuator force limit"
+    assert "openarm_left_finger_joint2" in p.position_names, "PhysX ignores the URDF mimic: joint2 is driven too"
+    t = dict(zip(p.position_names, p.position_targets()))
+    assert t["openarm_right_finger_joint2"] == t["openarm_right_finger_joint1"] == 0.01
     controllers()
     print("ok")
 
