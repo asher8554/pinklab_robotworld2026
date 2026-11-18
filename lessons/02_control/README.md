@@ -33,7 +33,7 @@ python lessons/02_control/pid.py --kp 15
 python lessons/02_control/pid.py --kx 0.05 --kv 0.1 --target 1 --seconds 20
 # 4. LQR
 python lessons/02_control/lqr.py
-python lessons/02_control/lqr.py --q 1 1 1 1 --r 10 --seconds 20
+python lessons/02_control/lqr.py --q 1 1 1 1 --r 10 --seconds 20 --push 0
 
 # 창으로 보려면 아무 명령에나 --viewer
 python lessons/02_control/lqr.py --viewer
@@ -53,7 +53,7 @@ python lessons/02_control/test_control.py                   # ok
    - 셋 다 기본 외란(3 N)을 넣으면 결국 레일 끝에서 넘어진다. 카트 위치를 안 보는 구조의 한계다.
 3. **캐스케이드 PID** — 바깥 루프가 "카트를 1 m 로 보내려면 막대를 얼마나 기울일지"를 정하고 안쪽 루프가 그 각도를 따른다. 20 s 에 x ≈ 1.000 m. 목표 각도 = −(Kx(x−target) + Kv·ẋ) 로 **부호가 직관과 반대**다. 카트를 +x 로 보내려면 먼저 −x 로 살짝 빼서 막대를 +x 로 기울여야 하기 때문이다(비최소 위상). 이득 5개를 손으로 맞춰야 한다.
 4. **LQR** — 출력의 `K` 4개가 위치 · 각도 · 속도 · 각속도 이득이다. 기본값(Q = diag(10, 100, 1, 1), R = 0.1)으로 10 s 에 x = 1.000 m, 각도 ≈ 0. 외란도 받아낸다. 캐스케이드의 반직관적 부호가 `K` 안에 이미 들어 있다(위치 이득과 각도 이득의 부호가 같다).
-5. **Q, R 조절** — `--r 10` 이면 힘을 아껴 느리게 간다(20 s 에 x ≈ 2.0 m 은 아직 수렴 전, 더 길게 돌려 본다). Q 의 각도 항을 키우면 막대를 더 꼿꼿이 세우고, 위치 항을 키우면 카트를 더 서둘러 보낸다.
+5. **Q, R 조절** — `--q 1 1 1 1 --r 10 --push 0` 이면 힘을 아껴 느리게 간다(약 12 s 에 x = 1.00 m). 같은 이득에 기본 외란(3 N)을 넣으면 힘이 모자라 밀려 가다 5.2 s 에 레일 끝에서 넘어진다. Q 의 각도 항을 키우면 막대를 더 꼿꼿이 세우고, 위치 항을 키우면 카트를 더 서둘러 보낸다.
 
 ## 핵심 코드
 
