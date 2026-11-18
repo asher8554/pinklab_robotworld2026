@@ -63,6 +63,12 @@ def main():
     x1 = p.odom[0]
     p.integrate_odom(0.01)
     assert abs((p.odom[0] - x1) * math.cos(0) - 2 * 0.0415 * 0.0825 * math.cos(p.odom[2])) < 1e-6 or abs(math.hypot(p.odom[0] - x1, 0) - 2 * 0.0415 * 0.0825) < 1e-3
+    # a one-step wheel jitter while standing still must not read as driving (> 0.04 m/s)
+    p.twist[:] = 0.0
+    q[0] += 0.004
+    p.update_state(0.03, q, np.zeros(len(q)))
+    p.integrate_odom(1 / 120)
+    assert abs(p.twist[0]) < 0.04, p.twist
     # leaving the drive pose blocks driving
     q[DOFS.index("openarm_left_joint4")] = 0.5
     p.update_state(0.03, q, np.zeros(len(q)))

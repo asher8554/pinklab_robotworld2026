@@ -15,6 +15,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
+TWIST_TAU = 0.1   # [s] 오도메트리 속도 평활 시정수 (integrate_odom)
+
 
 class _Model:
     """관절 번호 = Isaac DOF 번호. 액추에이터는 MuJoCo 이름 규칙(<관절>_position)을 따른다."""
@@ -125,4 +127,7 @@ class IsaacPhysics:
         ds, da = (dl + dr) / 2, (dr - dl) / self.track
         theta = self.odom[2] + da / 2
         self.odom += [ds * math.cos(theta), ds * math.sin(theta), da]
-        self.twist[:] = [ds / dt, da / dt]
+        # 속도는 0.1 s 시정수로 평활한다. PhysX 바퀴 · 캐스터 접촉은 팔이 움직일 때 한 스텝(8 ms) 단위로 떨려서,
+        # 그대로 쓰면 Controllers 의 "베이스 움직임(> 0.04 m/s) 이면 팔 goal 거절" 이 멈춘 로봇에서도 걸린다.
+        alpha = min(1.0, dt / TWIST_TAU)
+        self.twist += alpha * (np.array([ds / dt, da / dt]) - self.twist)
