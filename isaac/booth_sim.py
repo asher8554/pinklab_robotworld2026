@@ -289,6 +289,44 @@ for c in CUPS:
     bind(BOOTH_PRIMS[c], cup)
 
 
+def aruco_texture(marker):
+    """MJCF 변환기는 PNG 텍스처를 옮기지 않는다 (마커가 흰 판으로 보인다). 원본 aruco_N.png 를 붙인 사각형을 같은 자리에 만든다.
+    MuJoCo 마커 평면과 같은 방향: 로컬 x 가 보는 사람의 오른쪽, y 가 위, +z 가 로봇 쪽 법선."""
+    mid = int(marker["id"])
+    body, plate = BOOTH_PRIMS.get(f"aruco_{mid}"), BOOTH_PRIMS.get(f"aruco_{mid}_plate")
+    png = EXPORT / "world/build" / f"aruco_{mid}.png"
+    if body is None or not png.exists():
+        return False
+    h = float(marker.get("plate", marker["size"] * 1.25)) / 2
+    quad = UsdGeom.Mesh.Define(stage, f"{body}/isaac_marker")
+    quad.CreatePointsAttr([(-h, -h, 0.001), (h, -h, 0.001), (h, h, 0.001), (-h, h, 0.001)])
+    quad.CreateFaceVertexCountsAttr([4])
+    quad.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+    quad.CreateDoubleSidedAttr(True)
+    UsdGeom.PrimvarsAPI(quad).CreatePrimvar("st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex).Set(
+        [(0, 0), (1, 0), (1, 1), (0, 1)])
+    mat = UsdShade.Material.Define(stage, f"/World/Looks/aruco_{mid}")
+    reader = UsdShade.Shader.Define(stage, f"{mat.GetPath()}/st")
+    reader.CreateIdAttr("UsdPrimvarReader_float2")
+    reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
+    tex = UsdShade.Shader.Define(stage, f"{mat.GetPath()}/texture")
+    tex.CreateIdAttr("UsdUVTexture")
+    tex.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(str(png))
+    tex.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(reader.ConnectableAPI(), "result")
+    surface = UsdShade.Shader.Define(stage, f"{mat.GetPath()}/surface")
+    surface.CreateIdAttr("UsdPreviewSurface")
+    surface.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(tex.ConnectableAPI(), "rgb")
+    surface.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.9)
+    mat.CreateSurfaceOutput().ConnectToSource(surface.ConnectableAPI(), "surface")
+    UsdShade.MaterialBindingAPI.Apply(quad.GetPrim()).Bind(mat)
+    if plate:
+        UsdGeom.Imageable(stage.GetPrimAtPath(plate)).MakeInvisible()
+    return True
+
+
+MARKERS_DRAWN = sum(aruco_texture(m) for m in WORLD.get("markers", [])) if not args.no_booth else 0
+
+
 # ------------------------------------------------------------------ 3. 카메라 (MuJoCo 의 CameraRig 대신 RTX 렌더)
 CAMERAS = [] if args.cameras.strip().lower() == "none" else [c.strip() for c in args.cameras.split(",") if c.strip()]
 CAM_W, CAM_H = (int(v) for v in args.camera_size.lower().split("x"))
@@ -550,7 +588,7 @@ callback_id = SimulationManager.register_callback(on_physics_step, IsaacEvents.P
 for _ in range(3):
     simulation_app.update()
 state["z0"] = float(state["T_w_bl"][2, 3])
-say(f"ready | domain {os.environ['ROS_DOMAIN_ID']} | spawn {SPAWN} | {len(DOF)} dofs | cameras {CAMERAS or 'none'} | "
+say(f"ready | domain {os.environ['ROS_DOMAIN_ID']} | spawn {SPAWN} | {len(DOF)} dofs | cameras {CAMERAS or 'none'} | aruco {MARKERS_DRAWN} | "
     f"physics {args.physics_hz:g} Hz | actions left/right_joint_trajectory_controller, left/right_gripper_controller")
 
 # ------------------------------------------------------------------ 7. 메인 루프 (렌더 · 카메라 발행 · 실시간 맞추기)
