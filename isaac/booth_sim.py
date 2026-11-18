@@ -371,6 +371,8 @@ if CAMERAS:
             annotators[name + "#params"] = (params, fovy)
 
 SimulationManager.set_physics_dt(1.0 / args.physics_hz)
+# CPU PhysX: 로봇 한 대 장면이라 GPU 파이프라인이 이득이 없고, GPU 에서는 운반 중 쥔 컵의 손가락 접촉이 발산해 컵이 튀어 나갔다.
+SimulationManager.set_device("cpu")
 RenderingManager.set_dt(1.0 / args.render_hz)
 if args.headless:
     # 창이 없어도 기본 뷰포트를 매 프레임 그린다. 필요한 것은 로봇 카메라뿐이므로 끈다 (프레임 비용 절약).
