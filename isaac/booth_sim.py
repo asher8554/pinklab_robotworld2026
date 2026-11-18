@@ -38,10 +38,17 @@ parser.add_argument("--export", default=str(REPO / "artifacts/isaac"), help="exp
 parser.add_argument("--reimport", action="store_true", help="URDF · MJCF 를 다시 USD 로 변환 (내보내기를 다시 했을 때)")
 parser.add_argument("--spawn", default="", help="시작 자세: X,Y,YAW 또는 장소 이름(drinks ...). 비우면 booth.yaml spawn. WSL 쪽 spawn:= 과 같게")
 parser.add_argument("--physics-hz", type=float, default=120.0)
-parser.add_argument("--render-hz", type=float, default=30.0, help="화면 · 카메라를 그리는 주기 (물리 여러 스텝마다 한 번)")
+parser.add_argument("--render-hz", type=float, default=30.0, help="화면을 그리는 주기 (시뮬레이션 시간 기준)")
+parser.add_argument("--camera-subframes", type=int, default=6,
+                    help="카메라 영상을 찍을 때 물리를 멈추고 같은 자세로 더 그리는 횟수 (0 = 끔). 6.2 실시간 렌더는 DLSS 가 이전 프레임을 "
+                         "섞어서, 0 이면 회전한 직후 도킹 마커로 잰 방향이 약 7° 늦었다. 6 이면 회전 중에도 1° 이내")
 parser.add_argument("--cameras", default="base_camera,head_camera", help="쉼표로 구분, none = 카메라 없음 (주행만 볼 때 가볍다)")
-parser.add_argument("--camera-size", default="320x240")
-parser.add_argument("--camera-fps", type=float, default=2.0, help="시뮬레이션 시간 기준 발행 주기")
+parser.add_argument("--camera-size", default="640x480",
+                    help="cameras.yaml 기본값. MuJoCo 실습은 속도 때문에 320x240 이지만 Isaac 은 렌더 비용이 해상도보다 장면에 달려 있고, "
+                         "320x240 에서는 도킹 마커의 좌우 추정이 프레임마다 ±3 cm 흔들렸다")
+parser.add_argument("--camera-fps", type=float, default=10.0,
+                    help="시뮬레이션 시간 기준 발행 주기. MuJoCo 는 2 지만, 도킹 코드는 마커 측정을 도착 후 0.8 s(벽시계)까지만 쓰므로 "
+                         "실시간보다 느린 Isaac 에서는 넉넉히 높인다")
 parser.add_argument("--no-realtime", action="store_true", help="실시간보다 빨라도 늦추지 않는다")
 parser.add_argument("--no-booth", action="store_true", help="부스 없이 바닥과 로봇만 (로봇 단독 시험)")
 parser.add_argument("--debug", action="store_true", help="처음 5 s 동안 0.1 s 마다 차체 높이 · 가장 빠른 관절을 찍는다 (발산 원인 찾기)")
@@ -338,6 +345,9 @@ annotators = {}
 if CAMERAS:
     import omni.replicator.core as rep
 
+    # 6.2 의 실시간 렌더는 경로 추적(RealTimePathTracing)이라 잡음을 DLSS 가 이전 프레임을 섞어 지운다. FXAA 로 바꾸면 잡음이
+    # 남아 마커를 못 찾고, 다른 렌더 모드는 받지 않는다 (2026-11-18 확인). 그래서 DLSS 를 두고, 영상을 찍을 때 물리를 멈춘 채
+    # 같은 자세로 몇 번 더 그려 (--camera-subframes) 잔상을 지운다.
     for name in CAMERAS:
         frame = ROBOT_PRIMS.get(f"{name}_optical_frame")
         if frame is None or name not in SIM["cameras"]["cameras"]:
@@ -355,10 +365,21 @@ if CAMERAS:
         ann = rep.AnnotatorRegistry.get_annotator("rgb")
         ann.attach([rp])
         annotators[name] = (ann, f"{name}_optical_frame")
+        if args.debug:
+            params = rep.AnnotatorRegistry.get_annotator("camera_params")
+            params.attach([rp])
+            annotators[name + "#params"] = (params, fovy)
 
 SimulationManager.set_physics_dt(1.0 / args.physics_hz)
 RenderingManager.set_dt(1.0 / args.render_hz)
-if not args.headless:
+if args.headless:
+    # 창이 없어도 기본 뷰포트를 매 프레임 그린다. 필요한 것은 로봇 카메라뿐이므로 끈다 (프레임 비용 절약).
+    from omni.kit.viewport.utility import get_active_viewport
+
+    _vp = get_active_viewport()
+    if _vp is not None:
+        _vp.updates_enabled = False
+else:
     ViewportManager.set_camera_view("/OmniverseKit_Persp", eye=[SPAWN[0] - 3.0, SPAWN[1] - 3.5, 3.2], target=[SPAWN[0], SPAWN[1], 0.6])
 
 
@@ -481,6 +502,7 @@ def scan(T_w_bl):
 
 # ------------------------------------------------------------------ 6. 물리 스텝 콜백
 timeline = omni.timeline.get_timeline_interface()
+carb_settings = carb.settings.get_settings()
 timeline.play()
 simulation_app.update()
 robot = Articulation(ARTICULATION)
@@ -600,15 +622,36 @@ say(f"ready | domain {os.environ['ROS_DOMAIN_ID']} | spawn {SPAWN} | {len(DOF)} 
 CAM_DT = 1.0 / args.camera_fps
 wall0, sim0 = time.monotonic(), state["t"]
 while simulation_app.is_running() and not state["error"]:
+    up0 = time.perf_counter()
     simulation_app.update()
+    state["update_s"] = state.get("update_s", 0.0) + time.perf_counter() - up0
+    state["updates"] = state.get("updates", 0) + 1
     t = state["t"]
     if annotators and t >= state["next_cam"]:
+        img0 = time.perf_counter()
+        if args.camera_subframes > 0:             # 물리를 멈추고 같은 자세로 더 그려 DLSS 누적을 지금 자세로 수렴시킨다
+            # timeline.pause()/play() 는 쓰지 않는다: 재생할 때마다 접촉이 흔들려 (관절 속도가 튄다) 손에 쥔 컵이 운반 중 튀어 나갔다.
+            # SimulationContext.render() 처럼 타임라인은 둔 채 물리 스텝만 끈다.
+            carb_settings.set("/app/player/playSimulations", False)
+            for _ in range(args.camera_subframes):
+                simulation_app.update()
+            carb_settings.set("/app/player/playSimulations", True)
         for name, (ann, frame_id) in annotators.items():
             data = ann.get_data()
+            if name.endswith("#params"):          # --debug: 렌더러가 실제로 쓰는 투영과 MuJoCo 식 초점 거리 비교 (한 번만)
+                if data and "cameraProjection" in data and not state.get(name):
+                    P = np.asarray(data["cameraProjection"]).reshape(4, 4)
+                    f_used = abs(P[1, 1]) * CAM_H / 2
+                    say(f"debug {name[:-7]} projection fy={f_used:.2f} px, expected {CAM_H / (2 * math.tan(frame_id / 2)):.2f} px, "
+                        f"aperture {data.get('cameraAperture')}, focal {data.get('cameraFocalLength')}, P diag {np.round(np.diag(P), 4).tolist()}")
+                    state[name] = True
+                continue
             if data is not None and getattr(data, "size", 0):
                 ros.publish_image(name, stamp(t), frame_id, np.asarray(data))
                 state["count"]["img"] += 1
         state["next_cam"] = t + CAM_DT
+        state["img_s"] = state.get("img_s", 0.0) + time.perf_counter() - img0
+    u0 = time.perf_counter()
     if not args.no_realtime:
         ahead = (t - sim0) - (time.monotonic() - wall0)
         if ahead > 0:
@@ -638,7 +681,9 @@ if args.seconds:
     print("INFO fingers joint1/joint2 " + ", ".join(f"{s} {qf[DOF.index(f'openarm_{s}_finger_joint1')]:.4f}/{qf[DOF.index(f'openarm_{s}_finger_joint2')]:.4f}"
                                                 for s in ("left", "right")), flush=True)
     print(f"REALTIME {sim_s / max(wall_s, 1e-6):.2f}x ({sim_s:.1f} s sim in {wall_s:.1f} s wall; physics callback "
-          f"{state['cb_s']:.1f} s of which lidar {state['scan_s']:.1f} s; diverged at {state['nan_at']})", flush=True)
+          f"{state['cb_s']:.1f} s of which lidar {state['scan_s']:.1f} s; app.update {state.get('update_s', 0):.1f} s incl. callback; "
+          f"images {state.get('img_s', 0):.1f} s; {state.get('updates', 0) / max(sim_s, 1e-6):.0f} rendered frames per sim s; "
+          f"diverged at {state['nan_at']})", flush=True)
     print("SELF-CHECK", "PASS" if all(ok for _, ok, _ in checks) else "FAIL", flush=True)
 
 timeline.stop()
