@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<!-- lessons/02_control 의 PID · LQR 카트-폴 예제를 브라우저에서 이득을 바꿔 가며 체험하는 실습 페이지 -->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>20 제어 기법 PID · LQR (로보월드 2026): 카트-폴로 직접 튜닝해 보기</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root {
+  --bg: #0b0d17;
+  --glass: rgba(255, 255, 255, 0.07);
+  --glass-strong: rgba(255, 255, 255, 0.11);
+  --border: rgba(255, 255, 255, 0.16);
+  --text: #eef0f8;
+  --muted: #a9afc6;
+  --accent: #ff7ab6;
+  --cyan: #5fd4ff;
+  --orange: #ffb35c;
+  --green: #6be3a4;
+  --red: #ff6b7d;
+  --code-bg: rgba(5, 7, 15, 0.72);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font-family: "Pretendard Variable", Pretendard, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+/* 유리 뒤에서 흐려질 배경 */
+.blobs { position: fixed; inset: 0; z-index: -1; overflow: hidden; }
+.blobs span { position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.55; }
+.blobs span:nth-child(1) { width: 520px; height: 520px; background: #ff4f9a; top: -140px; left: -120px; }
+.blobs span:nth-child(2) { width: 460px; height: 460px; background: #3d7bff; top: 30%; right: -160px; }
+.blobs span:nth-child(3) { width: 420px; height: 420px; background: #20c9a6; bottom: -160px; left: 30%; }
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.wrap { max-width: 1280px; margin: 0 auto; padding: 28px 16px 60px; }
+header { padding: 26px 28px; margin-bottom: 18px; }
+header .tag { color: var(--accent); font-weight: 700; font-size: 14px; letter-spacing: 0.04em; }
+h1 { margin: 4px 0 8px; font-size: clamp(24px, 3.4vw, 36px); line-height: 1.25; }
+header p { margin: 0; color: var(--muted); max-width: 900px; }
+h2 { font-size: 20px; margin: 0 0 12px; }
+h3 { font-size: 16px; margin: 0 0 8px; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
+@media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
+.panel { padding: 18px 20px; }
+canvas { width: 100%; display: block; border-radius: 12px; background: rgba(5, 7, 15, 0.55); }
+#scene { aspect-ratio: 16 / 7; }
+#plot { aspect-ratio: 16 / 7; margin-top: 12px; }
+.readout { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.readout div { background: var(--glass-strong); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; }
+.readout b { display: block; font-size: 12px; color: var(--muted); font-weight: 500; }
+.readout span { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700; }
+#status { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--glass-strong); border: 1px solid var(--border); font-weight: 600; }
+#status.ok { border-color: rgba(107, 227, 164, 0.6); color: var(--green); }
+#status.bad { border-color: rgba(255, 107, 125, 0.6); color: var(--red); }
+.modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 14px; }
+button {
+  font: inherit; color: var(--text); cursor: pointer;
+  background: var(--glass-strong); border: 1px solid var(--border); border-radius: 10px;
+  padding: 8px 10px; transition: background 0.15s, border-color 0.15s;
+}
+button:hover { background: rgba(255, 255, 255, 0.18); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+button[aria-pressed="true"] { background: rgba(255, 122, 182, 0.28); border-color: var(--accent); font-weight: 700; }
+button.primary { background: rgba(255, 122, 182, 0.32); border-color: var(--accent); font-weight: 700; }
+.row-btns { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.row-btns button { flex: 1 1 auto; }
+.ctl { margin: 10px 0; }
+.ctl label { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); }
+.ctl label output { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+fieldset { border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px 4px; margin: 10px 0; }
+legend { padding: 0 6px; font-size: 13px; color: var(--accent); font-weight: 700; }
+.hidden { display: none; }
+.kvec { font-family: "JetBrains Mono", Consolas, monospace; font-size: 13px; background: var(--code-bg); border-radius: 10px; padding: 8px 10px; margin-top: 8px; word-break: break-all; }
+.presets button { font-size: 13px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 18px; }
+.cards .panel p, .cards .panel li { color: #d6daea; font-size: 15px; }
+.cards ul { padding-left: 18px; margin: 0; }
+section.panel { margin-top: 18px; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; overflow-x: auto; font-size: 13.5px; line-height: 1.55; margin: 8px 0; }
+code { font-family: "JetBrains Mono", Consolas, monospace; }
+p code, li code { background: rgba(255, 255, 255, 0.1); padding: 1px 6px; border-radius: 6px; font-size: 0.92em; }
+.com { color: #8a93b2; }
+.code-wrap { position: relative; }
+.code-wrap button { position: absolute; top: 8px; right: 8px; font-size: 12px; padding: 4px 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { border-bottom: 1px solid var(--border); padding: 7px 8px; text-align: left; vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+.note { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="blobs" aria-hidden="true"><span></span><span></span><span></span></div>
+<div class="wrap">
+
+<header class="glass">
+  <div class="tag">20 · 제어 기법 실습 · <code>lessons/02_control</code></div>
+  <h1>PID 와 LQR — 카트-폴로 직접 튜닝해 보기</h1>
+  <p>레일 위 카트에 힘을 주어 막대를 세웁니다. 슬라이더를 움직이면 실행 중에도 바로 반영됩니다.
+     PID 는 막대 각도 하나만 보고, LQR 은 위치 · 각도 · 속도 · 각속도 4개를 한꺼번에 봅니다.
+     마지막 절의 명령으로 같은 실험을 MuJoCo 에서도 돌려 숫자를 비교해 보세요.</p>
+</header>
+
+<div class="grid">
+  <div class="glass panel">
+    <canvas id="scene" width="960" height="420" role="img" aria-label="카트-폴 시뮬레이션 화면"></canvas>
+    <canvas id="plot" width="960" height="420" role="img" aria-label="카트 위치와 막대 각도 그래프"></canvas>
+    <div class="readout" aria-live="off">
+      <div><b>t [s]</b><span id="r-t">0.00</span></div>
+      <div><b>x [m]</b><span id="r-x">0.000</span></div>
+      <div><b>각도 [deg]</b><span id="r-a">0.00</span></div>
+      <div><b>u [N]</b><span id="r-u">0.00</span></div>
+    </div>
+    <div id="status" role="status">▶ 시작을 누르세요.</div>
+  </div>
+
+  <aside class="glass panel" aria-label="제어 설정">
+    <h2>제어기</h2>
+    <div class="modes" role="group" aria-label="제어 방식">
+      <button data-mode="pid" aria-pressed="true">각도 PID</button>
+      <button data-mode="cascade" aria-pressed="false">캐스케이드</button>
+      <button data-mode="lqr" aria-pressed="false">LQR</button>
+    </div>
+
+    <div class="row-btns">
+      <button id="btn-run" class="primary">▶ 시작 / 재시작</button>
+      <button id="btn-pause">⏸ 일시정지</button>
+    </div>
+    <div class="row-btns">
+      <button id="btn-push-l">◀ 왼쪽으로 밀기</button>
+      <button id="btn-push-r">오른쪽으로 밀기 ▶</button>
+    </div>
+
+    <div id="grp-pid">
+      <fieldset>
+        <legend>안쪽 루프 · 막대 각도 PID</legend>
+        <div class="ctl"><label for="kp">Kp <output id="o-kp"></output></label><input id="kp" type="range" min="0" max="150" step="1" value="60"></div>
+        <div class="ctl"><label for="ki">Ki <output id="o-ki"></output></label><input id="ki" type="range" min="0" max="100" step="1" value="0"></div>
+        <div class="ctl"><label for="kd">Kd <output id="o-kd"></output></label><input id="kd" type="range" min="0" max="20" step="0.5" value="8"></div>
+      </fieldset>
+      <fieldset id="grp-outer" class="hidden">
+        <legend>바깥 루프 · 카트 위치 → 목표 각도</legend>
+        <div class="ctl"><label for="kx">Kx [rad/m] <output id="o-kx"></output></label><input id="kx" type="range" min="0" max="0.3" step="0.01" value="0.05"></div>
+        <div class="ctl"><label for="kv">Kv [rad/(m/s)] <output id="o-kv"></output></label><input id="kv" type="range" min="0" max="0.5" step="0.01" value="0.1"></div>
+      </fieldset>
+    </div>
+
+    <div id="grp-lqr" class="hidden">
+      <fieldset>
+        <legend>LQR 비용 (로그 눈금)</legend>
+        <div class="ctl"><label for="q0">Q 위치 <output id="o-q0"></output></label><input id="q0" type="range" min="-1" max="3" step="0.1" value="1"></div>
+        <div class="ctl"><label for="q1">Q 각도 <output id="o-q1"></output></label><input id="q1" type="range" min="-1" max="3" step="0.1" value="2"></div>
+        <div class="ctl"><label for="q2">Q 속도 <output id="o-q2"></output></label><input id="q2" type="range" min="-1" max="3" step="0.1" value="0"></div>
+        <div class="ctl"><label for="q3">Q 각속도 <output id="o-q3"></output></label><input id="q3" type="range" min="-1" max="3" step="0.1" value="0"></div>
+        <div class="ctl"><label for="r">R 힘 <output id="o-r"></output></label><input id="r" type="range" min="-2" max="2" step="0.1" value="-1"></div>
+      </fieldset>
+      <div class="kvec" id="kvec" aria-live="polite">K = …</div>
+    </div>
+
+    <fieldset id="grp-target" class="hidden">
+      <legend>목표</legend>
+      <div class="ctl"><label for="target">카트 목표 위치 [m] <output id="o-target"></output></label><input id="target" type="range" min="-2" max="2" step="0.1" value="1"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>실험 조건 (재시작 때 적용)</legend>
+      <div class="ctl"><label for="angle0">처음 기울기 [rad] <output id="o-angle0"></output></label><input id="angle0" type="range" min="-0.5" max="0.5" step="0.01" value="0.15"></div>
+      <div class="ctl"><label for="push">t=4 s 외란 [N] <output id="o-push"></output></label><input id="push" type="range" min="0" max="10" step="0.5" value="3"></div>
+      <div class="ctl"><label for="seconds">길이 [s] <output id="o-seconds"></output></label><input id="seconds" type="range" min="5" max="30" step="1" value="10"></div>
+    </fieldset>
+
+    <h3>README 실험 바로 해 보기</h3>
+    <div class="row-btns presets" id="presets"></div>
+  </aside>
+</div>
+
+<div class="cards">
+  <div class="glass panel">
+    <h3>① 각도 PID 의 한계</h3>
+    <p>막대는 1 초 안에 서지만 카트가 <b>0.3 m/s</b> 로 계속 밀려갑니다. 외란 뒤 더 빨리 밀려 약 5 초에 레일 끝(±2.9 m)에서 넘어집니다. 각도 오차만 0 으로 만들 뿐 카트 위치는 PID 의 관심 밖입니다.</p>
+  </div>
+  <div class="glass panel">
+    <h3>② 이득 바꾸기</h3>
+    <ul>
+      <li><code>Kd 0</code> 감쇠가 없어 ±5° 진동이 계속</li>
+      <li><code>Kp 15</code> 기울기를 못 따라가 2.3 s 만에 넘어짐</li>
+      <li><code>Ki 50</code> 밀려남이 줄지만 외란을 넣으면 결국 넘어짐</li>
+    </ul>
+    <p class="note">외란 0 N 으로 놓고 비교하면 차이가 잘 보입니다.</p>
+  </div>
+  <div class="glass panel">
+    <h3>③ 캐스케이드 PID</h3>
+    <p>바깥 루프가 목표 각도 = −(Kx(x−target) + Kv·ẋ) 를 정합니다. <b>부호가 직관과 반대</b>입니다. 카트를 +x 로 보내려면 먼저 −x 로 살짝 빼서 막대를 +x 로 기울여야 하기 때문입니다. 이득 5개를 손으로 맞춰야 합니다.</p>
+  </div>
+  <div class="glass panel">
+    <h3>④ LQR</h3>
+    <p>K 4개를 비용 Q, R 에서 계산합니다. 기본값으로 10 s 에 x = 1.000 m, 외란도 받아냅니다. R=10 이면 힘을 아껴 느려지고(외란 없이 약 12 s 에 1 m), 3 N 외란을 넣으면 힘이 모자라 5.2 s 에 레일 끝에서 넘어집니다. Q 각도를 키우면 막대를 더 꼿꼿이 세웁니다. 캐스케이드의 반대 부호는 K 안에 이미 들어 있습니다(위치 · 각도 이득 부호가 같음).</p>
+  </div>
+</div>
+
+<section class="glass panel">
+  <h2>핵심 코드</h2>
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));">
+    <div>
+      <h3>PID — <code>pid.py</code></h3>
+<pre><code>error = measured - self.setpoint
+self.integral += error * dt
+derivative = (error - self.prev_error) / dt
+u = kp * error + ki * self.integral + kd * derivative</code></pre>
+    </div>
+    <div>
+      <h3>LQR — <code>lqr.py</code></h3>
+<pre><code><span class="com"># x[k+1] ≈ A x[k] + B u[k]  (수치 미분, 식 유도 없음)</span>
+mujoco.mjd_transitionFD(model, data, 1e-6, True, A, B, None, None)
+P = solve_discrete_are(A, B, Q, R)
+K = np.linalg.solve(R + B.T @ P @ B, B.T @ P @ A)
+u = -K @ (np.concatenate([data.qpos, data.qvel]) - goal)</code></pre>
+    </div>
+  </div>
+  <p class="note">이 페이지의 LQR 도 같은 순서입니다. 브라우저 물리 한 스텝을 중앙 차분으로 미분해 A, B 를 얻고, 리카티 반복으로 K 를 구합니다.</p>
+</section>
+
+<section class="glass panel">
+  <h2>MuJoCo 에서 실제로 돌리기</h2>
+  <p>WSL 실습본(<code>~/pinklab_robotworld2026</code>, 커밋 2b1a52d)에는 이 예제가 아직 없습니다. Windows 쪽 저장소에서 폴더를 복사한 뒤 실행합니다.</p>
+  <div class="code-wrap">
+    <button type="button" data-copy="cmd-run">복사</button>
+<pre><code id="cmd-run">cp -r "/mnt/e/Github/MuJoCo + ROS2/pinklab_robotworld2026/lessons/02_control" ~/pinklab_robotworld2026/lessons/
+cd ~/pinklab_robotworld2026 &amp;&amp; source scripts/env.sh
+
+python lessons/02_control/pid.py                                            # ① 각도 PID
+python lessons/02_control/pid.py --kd 0 --push 0                            # ② 이득
+python lessons/02_control/pid.py --kx 0.05 --kv 0.1 --target 1 --seconds 20 # ③ 캐스케이드
+python lessons/02_control/lqr.py                                            # ④ LQR
+python lessons/02_control/lqr.py --q 1 1 1 1 --r 10 --seconds 20 --push 0
+
+python lessons/02_control/lqr.py --viewer       # 아무 명령에나 --viewer 를 붙이면 MuJoCo 창
+python lessons/02_control/test_control.py       # ok</code></pre>
+  </div>
+  <table>
+    <thead><tr><th>파일</th><th>내용</th></tr></thead>
+    <tbody>
+      <tr><td><code>cartpole.xml</code></td><td>카트(slide, ±2.9 m, 1 kg) + 막대(hinge, 0.6 m, 0.2 kg). 카트 힘 motor ±20 N</td></tr>
+      <tr><td><code>sim.py</code></td><td>공통 루프. 0.5 s 마다 출력, t=4 s 에 막대를 0.1 s 미는 외란</td></tr>
+      <tr><td><code>pid.py</code></td><td><code>--kp --ki --kd</code>, 바깥 루프 <code>--kx --kv --target</code></td></tr>
+      <tr><td><code>lqr.py</code></td><td><code>--q</code> 4개, <code>--r</code>, <code>--target</code></td></tr>
+    </tbody>
+  </table>
+  <p class="note">이 페이지의 물리는 <code>cartpole.xml</code> 의 질량 · 길이 · 감쇠 · 힘 제한을 옮긴 브라우저 근사입니다(막대는 균일 막대, 레일 끝은 단단한 멈춤). 경향과 K 값은 MuJoCo 와 거의 같지만 소수점 아래 숫자는 다를 수 있습니다.</p>
+</section>
+
+</div>
+
+<script>
+// CORE-START  브라우저 카트-폴 물리와 제어기 (node 검증 스크립트가 이 구간만 잘라 씀)
+const P = { M: 1.0, m: 0.2, L: 0.6, g: 9.81, bx: 0.1, bth: 0.01, dt: 0.002, umax: 20, xlim: 2.9, fall: 0.8 };
+P.l = P.L / 2;
+P.J = P.m * P.L * P.L / 3;   // 끝을 축으로 도는 균일 막대
+
+// s = [x, θ, ẋ, θ̇],  θ>0 이면 막대 끝이 +x 쪽.  fp = 막대 무게중심에 주는 +x 방향 외란 힘
+function accel(s, u, fp) {
+  const [, th, xd, thd] = s, c = Math.cos(th), sn = Math.sin(th);
+  const a11 = P.M + P.m, a12 = P.m * P.l * c, a22 = P.J;
+  const f1 = u - P.bx * xd + P.m * P.l * sn * thd * thd + fp;
+  const f2 = P.m * P.g * P.l * sn - P.bth * thd + fp * P.l * c;
+  const det = a11 * a22 - a12 * a12;
+  return [(a22 * f1 - a12 * f2) / det, (a11 * f2 - a12 * f1) / det];
+}
+
+// MuJoCo 기본 적분기처럼 속도 먼저, 위치 나중 (semi-implicit Euler)
+function step(s, u, fp, limit = true) {
+  const [ax, ath] = accel(s, u, fp);
+  const xd = s[2] + ax * P.dt, thd = s[3] + ath * P.dt;
+  const n = [s[0] + xd * P.dt, s[1] + thd * P.dt, xd, thd];
+  if (limit && Math.abs(n[0]) > P.xlim) {
+    // 레일 끝: 카트 속도를 0 으로 만드는 충격량을 질량 행렬로 풀어 막대 각속도에도 전달 (shortcut: 튕김 없는 완전 비탄성 멈춤)
+    const c = Math.cos(n[1]), a11 = P.M + P.m, a12 = P.m * P.l * c, a22 = P.J, det = a11 * a22 - a12 * a12;
+    const imp = -n[2] / (a22 / det);
+    n[3] += (-a12 / det) * imp;
+    n[0] = Math.sign(n[0]) * P.xlim; n[2] = 0;
+  }
+  return n;
+}
+
+function makePID() {
+  let integral = 0, prev = null;
+  return {
+    reset() { integral = 0; prev = null; },
+    // g = {kp, ki, kd, kx, kv, target}; kx=kv=0 이면 각도만 보는 PID
+    u(s, g) {
+      const setpoint = -(g.kx * (s[0] - g.target) + g.kv * s[2]);
+      const e = s[1] - setpoint;
+      integral += e * P.dt;
+      const d = prev === null ? 0 : (e - prev) / P.dt;
+      prev = e;
+      return g.kp * e + g.ki * integral + g.kd * d;
+    },
+  };
+}
+
+// mjd_transitionFD 처럼 한 스텝을 중앙 차분해 A(4x4), B(4)
+function linearize() {
+  const eps = 1e-6, x0 = [0, 0, 0, 0], A = [[], [], [], []], B = [];
+  for (let j = 0; j < 4; j++) {
+    const p = x0.slice(), m = x0.slice();
+    p[j] += eps; m[j] -= eps;
+    const sp = step(p, 0, 0, false), sm = step(m, 0, 0, false);
+    for (let i = 0; i < 4; i++) A[i][j] = (sp[i] - sm[i]) / (2 * eps);
+  }
+  const sp = step(x0, eps, 0, false), sm = step(x0, -eps, 0, false);
+  for (let i = 0; i < 4; i++) B[i] = (sp[i] - sm[i]) / (2 * eps);
+  return { A, B };
+}
+
+// 이산 리카티 방정식을 수렴할 때까지 반복. P = Q + KᵀRK + (A−BK)ᵀP(A−BK) 형태라 반올림 오차에도 P 가 양수로 남는다
+function lqrGain(A, B, q, r) {
+  const idx = [0, 1, 2, 3];
+  let Pm = idx.map(i => idx.map(j => (i === j ? q[i] : 0)));
+  let K = [0, 0, 0, 0];
+  for (let it = 0; it < 500000; it++) {
+    const PB = Pm.map(row => row.reduce((s, v, k) => s + v * B[k], 0));
+    const BtPB = B.reduce((s, v, k) => s + v * PB[k], 0);
+    K = idx.map(j => idx.reduce((s, k) => s + PB[k] * A[k][j], 0) / (r + BtPB));   // (R+BᵀPB)⁻¹ BᵀPA
+    const Acl = idx.map(i => idx.map(j => A[i][j] - B[i] * K[j]));
+    const PAcl = Pm.map(row => idx.map(j => row.reduce((s, v, k) => s + v * Acl[k][j], 0)));
+    let diff = 0;
+    const next = idx.map(i => idx.map(j => {
+      const v = (i === j ? q[i] : 0) + r * K[i] * K[j] + idx.reduce((s, k) => s + Acl[k][i] * PAcl[k][j], 0);
+      diff = Math.max(diff, Math.abs(v - Pm[i][j]) / (1 + Math.abs(v)));
+      return v;
+    }));
+    Pm = next;
+    if (diff < 1e-13) break;
+  }
+  return K;
+}
+
+// 한 실험을 끝까지 (페이지는 같은 순서를 애니메이션으로 나눠 돈다)
+function runHeadless(mode, g, cfg) {
+  let s = [0, cfg.angle0, 0, 0], t = 0, maxA = 0, fell = false;
+  const pid = makePID(), goal = [g.target, 0, 0, 0];
+  const K = mode === 'lqr' ? lqrGain(...Object.values(linearize()), g.q, g.r) : null;
+  const log = [];
+  while (t < cfg.seconds - 1e-9) {
+    let u = mode === 'lqr' ? -K.reduce((a, k, i) => a + k * (s[i] - goal[i]), 0) : pid.u(s, g);
+    u = Math.max(-P.umax, Math.min(P.umax, u));
+    const fp = cfg.push && t >= cfg.pushAt && t < cfg.pushAt + 0.1 ? cfg.push : 0;
+    s = step(s, u, fp);
+    t += P.dt;
+    maxA = Math.max(maxA, Math.abs(s[1]));
+    if (Math.round(t / P.dt) % 250 === 0) log.push([+t.toFixed(1), s[0], s[1] * 180 / Math.PI, u]);
+    if (Math.abs(s[1]) > P.fall) { fell = true; break; }
+  }
+  return { fell, t, x: s[0], angleDeg: s[1] * 180 / Math.PI, maxAngleDeg: maxA * 180 / Math.PI, K, log };
+}
+// CORE-END
+
+if (typeof document !== 'undefined') {
+  const $ = id => document.getElementById(id);
+  const PUSH_AT = 4.0, PUSH_DUR = 0.1;
+  const fmt = { kp: 0, ki: 0, kd: 1, kx: 2, kv: 2, target: 1, angle0: 2, push: 1, seconds: 0 };
+  let mode = 'pid', state, t, running = false, finished = false, pid = makePID(), K = null;
+  let lastU = 0, manualPush = 0, manualUntil = -1, hist = [], fellAt = null;
+
+  const val = id => parseFloat($(id).value);
+  const qv = () => [0, 1, 2, 3].map(i => Math.pow(10, val('q' + i)));
+  const rv = () => Math.pow(10, val('r'));
+  const gains = () => ({
+    kp: val('kp'), ki: val('ki'), kd: val('kd'),
+    kx: mode === 'cascade' ? val('kx') : 0, kv: mode === 'cascade' ? val('kv') : 0,
+    target: mode === 'pid' ? 0 : val('target'),
+  });
+  const sig = v => (v >= 100 ? v.toFixed(0) : v >= 1 ? v.toFixed(2) : v.toPrecision(2));
+
+  function updateOutputs() {
+    for (const id of Object.keys(fmt)) $('o-' + id).textContent = val(id).toFixed(fmt[id]);
+    for (let i = 0; i < 4; i++) $('o-q' + i).textContent = sig(Math.pow(10, val('q' + i)));
+    $('o-r').textContent = sig(rv());
+  }
+
+  function recomputeK() {
+    const { A, B } = linearize();
+    K = lqrGain(A, B, qv(), rv());
+    $('kvec').textContent = 'K = [' + K.map(k => k.toFixed(3)).join(', ') + ']   (위치, 각도, 속도, 각속도)';
+  }
+
+  function setMode(m) {
+    mode = m;
+    document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+    $('grp-pid').classList.toggle('hidden', m === 'lqr');
+    $('grp-outer').classList.toggle('hidden', m !== 'cascade');
+    $('grp-lqr').classList.toggle('hidden', m !== 'lqr');
+    $('grp-target').classList.toggle('hidden', m === 'pid');
+    if (m === 'lqr') recomputeK();
+    reset(); start();
+  }
+
+  function reset() {
+    state = [0, val('angle0'), 0, 0];
+    t = 0; lastU = 0; hist = []; fellAt = null; finished = false; manualUntil = -1;
+    pid.reset();
+    setStatus('', '진행 중…');
+    draw();
+  }
+
+  function start() { running = true; finished = false; $('btn-pause').textContent = '⏸ 일시정지'; }
+
+  function setStatus(cls, text) { const s = $('status'); s.className = cls; s.textContent = text; }
+
+  function simStep() {
+    const g = gains();
+    let u = mode === 'lqr'
+      ? -K.reduce((a, k, i) => a + k * (state[i] - [g.target, 0, 0, 0][i]), 0)
+      : pid.u(state, g);
+    u = Math.max(-P.umax, Math.min(P.umax, u));
+    const push = val('push');
+    let fp = push && t >= PUSH_AT && t < PUSH_AT + PUSH_DUR ? push : 0;
+    if (t < manualUntil) fp += manualPush;
+    state = step(state, u, fp);
+    t += P.dt; lastU = u;
+    if (Math.round(t / P.dt) % 10 === 0) hist.push([t, state[0], state[1] * 180 / Math.PI]);
+    if (Math.abs(state[1]) > P.fall) { fellAt = t; return false; }
+    return t < val('seconds') - 1e-9;
+  }
+
+  function finish() {
+    running = false; finished = true;
+    const deg = state[1] * 180 / Math.PI;
+    if (fellAt !== null) setStatus('bad', `넘어짐: t = ${fellAt.toFixed(2)} s, x = ${state[0].toFixed(3)} m`);
+    else setStatus('ok', `버팀: 최종 x = ${state[0].toFixed(3)} m, 최종 각도 = ${deg.toFixed(2)}°`);
+  }
+
+  let lastFrame = null, acc = 0;
+  function frame(now) {
+    if (running) {
+      if (lastFrame === null) lastFrame = now;
+      acc += Math.min(0.25, (now - lastFrame) / 1000);   // 탭이 쉬었다 돌아와도 한꺼번에 몰아 돌지 않게
+      while (acc >= P.dt && running) {
+        acc -= P.dt;
+        if (!simStep()) finish();
+      }
+    } else acc = 0;
+    lastFrame = now;
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  // 그리기 ------------------------------------------------------------
+  const scene = $('scene'), sc = scene.getContext('2d');
+  const plot = $('plot'), pc = plot.getContext('2d');
+
+  function draw() {
+    const W = scene.width, H = scene.height, scale = W / 6.6, ox = W / 2, rail = H * 0.72;
+    const X = x => ox + x * scale;
+    sc.clearRect(0, 0, W, H);
+    sc.strokeStyle = 'rgba(255,255,255,0.25)'; sc.lineWidth = 4;
+    sc.beginPath(); sc.moveTo(X(-P.xlim - 0.1), rail); sc.lineTo(X(P.xlim + 0.1), rail); sc.stroke();
+    sc.fillStyle = 'rgba(255,107,125,0.7)';
+    for (const e of [-P.xlim - 0.12, P.xlim + 0.12]) sc.fillRect(X(e) - 4, rail - 22, 8, 44);
+    sc.fillStyle = 'rgba(255,255,255,0.45)'; sc.font = '20px "Pretendard Variable", sans-serif'; sc.textAlign = 'center';
+    for (let m = -2; m <= 2; m++) { sc.fillRect(X(m) - 1, rail + 26, 2, 10); sc.fillText(m + ' m', X(m), rail + 58); }
+    if (mode !== 'pid') {
+      const tx = X(val('target'));
+      sc.strokeStyle = 'rgba(107,227,164,0.9)'; sc.setLineDash([8, 8]); sc.lineWidth = 2;
+      sc.beginPath(); sc.moveTo(tx, rail + 20); sc.lineTo(tx, H * 0.08); sc.stroke(); sc.setLineDash([]);
+      sc.fillStyle = 'rgba(107,227,164,0.95)'; sc.fillText('목표', tx, H * 0.07);
+    }
+    const [x, th] = state, cx = X(x);
+    // 힘 화살표
+    if (Math.abs(lastU) > 0.05) arrow(sc, cx, rail + 2, cx + lastU * 6, rail + 2, 'rgba(95,212,255,0.95)');
+    sc.fillStyle = '#4f8cff'; roundRect(sc, cx - 0.1 * scale, rail - 0.04 * scale, 0.2 * scale, 0.08 * scale, 8); sc.fill();
+    const tipX = cx + Math.sin(th) * P.L * scale, tipY = rail - Math.cos(th) * P.L * scale;
+    sc.strokeStyle = '#ffb35c'; sc.lineWidth = 12; sc.lineCap = 'round';
+    sc.beginPath(); sc.moveTo(cx, rail); sc.lineTo(tipX, tipY); sc.stroke();
+    sc.fillStyle = '#fff'; sc.beginPath(); sc.arc(cx, rail, 6, 0, Math.PI * 2); sc.fill();
+    const pushing = (val('push') && t >= PUSH_AT && t < PUSH_AT + PUSH_DUR) || t < manualUntil;
+    if (pushing) {
+      const dir = t < manualUntil ? Math.sign(manualPush) : 1;
+      const mx = (cx + tipX) / 2, my = (rail + tipY) / 2;
+      arrow(sc, mx - dir * 90, my, mx - dir * 14, my, 'rgba(255,107,125,1)');
+    }
+    sc.textAlign = 'left'; sc.fillStyle = 'rgba(255,255,255,0.7)';
+    sc.fillText({ pid: '각도 PID', cascade: '캐스케이드 PID', lqr: 'LQR' }[mode], 16, 32);
+    drawPlot();
+    $('r-t').textContent = t.toFixed(2);
+    $('r-x').textContent = state[0].toFixed(3);
+    $('r-a').textContent = (state[1] * 180 / Math.PI).toFixed(2);
+    $('r-u').textContent = lastU.toFixed(2);
+  }
+
+  function drawPlot() {
+    const W = plot.width, H = plot.height, T = val('seconds');
+    const L = 70, R = 70, top = 20, bottom = H - 40;
+    pc.clearRect(0, 0, W, H);
+    pc.font = '18px "Pretendard Variable", sans-serif';
+    const tx = tt => L + (tt / T) * (W - L - R);
+    const yX = v => top + (1 - (v + 3) / 6) * (bottom - top);         // x: −3 ~ 3 m
+    const yA = v => top + (1 - (v + 50) / 100) * (bottom - top);      // 각도: −50 ~ 50 deg
+    pc.strokeStyle = 'rgba(255,255,255,0.12)'; pc.lineWidth = 1;
+    for (let i = 0; i <= 6; i++) { const y = top + i * (bottom - top) / 6; pc.beginPath(); pc.moveTo(L, y); pc.lineTo(W - R, y); pc.stroke(); }
+    pc.fillStyle = 'rgba(255,255,255,0.6)'; pc.textAlign = 'center';
+    for (let s = 0; s <= T; s += T > 15 ? 5 : 2) pc.fillText(s + ' s', tx(s), H - 12);
+    pc.textAlign = 'right'; pc.fillStyle = '#5fd4ff';
+    for (const v of [-3, 0, 3]) pc.fillText(v + ' m', L - 8, yX(v) + 6);
+    pc.textAlign = 'left'; pc.fillStyle = '#ffb35c';
+    for (const v of [-50, 0, 50]) pc.fillText(v + '°', W - R + 8, yA(v) + 6);
+    if (mode !== 'pid') {
+      pc.strokeStyle = 'rgba(107,227,164,0.7)'; pc.setLineDash([6, 6]);
+      pc.beginPath(); pc.moveTo(L, yX(val('target'))); pc.lineTo(W - R, yX(val('target'))); pc.stroke(); pc.setLineDash([]);
+    }
+    line(pc, hist.map(h => [tx(h[0]), yX(h[1])]), '#5fd4ff');
+    line(pc, hist.map(h => [tx(h[0]), yA(h[2])]), '#ffb35c');
+    pc.textAlign = 'left';
+    pc.fillStyle = '#5fd4ff'; pc.fillText('━ 카트 x [m]', L + 10, top + 22);
+    pc.fillStyle = '#ffb35c'; pc.fillText('━ 막대 각도 [deg]', L + 150, top + 22);
+  }
+
+  function line(ctx, pts, color) {
+    if (pts.length < 2) return;
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.beginPath();
+    pts.forEach(([a, b], i) => (i ? ctx.lineTo(a, b) : ctx.moveTo(a, b)));
+    ctx.stroke();
+  }
+  function arrow(ctx, x1, y1, x2, y2, color) {
+    const a = Math.atan2(y2 - y1, x2 - x1);
+    ctx.strokeStyle = ctx.fillStyle = color; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - 14 * Math.cos(a - 0.45), y2 - 14 * Math.sin(a - 0.45));
+    ctx.lineTo(x2 - 14 * Math.cos(a + 0.45), y2 - 14 * Math.sin(a + 0.45));
+    ctx.closePath(); ctx.fill();
+  }
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  // 입력 ---------------------------------------------------------------
+  document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  document.querySelectorAll('input[type=range]').forEach(el => el.addEventListener('input', () => {
+    updateOutputs();
+    if (/^(q\d|r)$/.test(el.id)) recomputeK();
+    if (!running) draw();
+  }));
+  $('btn-run').addEventListener('click', () => { if (mode === 'lqr') recomputeK(); reset(); start(); });
+  $('btn-pause').addEventListener('click', () => {
+    if (finished) return;
+    running = !running;
+    $('btn-pause').textContent = running ? '⏸ 일시정지' : '▶ 계속';
+  });
+  const manual = dir => { if (!running) return; manualPush = dir * 3; manualUntil = t + PUSH_DUR; };
+  $('btn-push-l').addEventListener('click', () => manual(-1));
+  $('btn-push-r').addEventListener('click', () => manual(1));
+
+  const PRESETS = [
+    ['① 기본 각도 PID', 'pid', { kp: 60, ki: 0, kd: 8, push: 3, seconds: 10 }],
+    ['② Kd 0', 'pid', { kp: 60, ki: 0, kd: 0, push: 0, seconds: 10 }],
+    ['② Kp 15', 'pid', { kp: 15, ki: 0, kd: 8, push: 0, seconds: 10 }],
+    ['② Ki 50', 'pid', { kp: 60, ki: 50, kd: 8, push: 0, seconds: 10 }],
+    ['③ 캐스케이드', 'cascade', { kp: 60, ki: 0, kd: 8, kx: 0.05, kv: 0.1, target: 1, push: 3, seconds: 20 }],
+    ['④ LQR 기본', 'lqr', { q0: 1, q1: 2, q2: 0, q3: 0, r: -1, target: 1, push: 3, seconds: 10 }],
+    ['④ LQR R=10', 'lqr', { q0: 0, q1: 0, q2: 0, q3: 0, r: 1, target: 1, push: 0, seconds: 20 }],
+    ['④ R=10 + 외란', 'lqr', { q0: 0, q1: 0, q2: 0, q3: 0, r: 1, target: 1, push: 3, seconds: 20 }],
+  ];
+  for (const [label, m, v] of PRESETS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = label;
+    b.addEventListener('click', () => {
+      $('angle0').value = 0.15;
+      for (const [k, x] of Object.entries(v)) $(k).value = x;
+      updateOutputs(); setMode(m);
+    });
+    $('presets').appendChild(b);
+  }
+
+  document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); b.textContent = '복사됨'; }
+    catch { b.textContent = '직접 선택해 복사'; }
+    setTimeout(() => (b.textContent = '복사'), 1500);
+  }));
+
+  updateOutputs();
+  recomputeK();
+  reset();
+  running = false;
+  setStatus('', '▶ 시작을 누르거나 아래 실험 버튼을 고르세요.');
+  requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>

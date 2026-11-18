@@ -1,5 +1,8 @@
 # PinkLAB @ 로보월드 2026 — MuJoCo 부스와 안내 로봇
 
+> **이 저장소는 [PinkWink/pinklab_robotworld2026](https://github.com/PinkWink/pinklab_robotworld2026) 의 개인 실습용 fork 입니다.**
+> 원본 내용은 그대로 두고, 제어 기법(PID · LQR) 실습 [`lessons/02_control/`](lessons/02_control/) 을 더했습니다. 아래 [제어 기법 실습](#제어-기법-실습-pid--lqr) 절을 보세요.
+
 로보월드 2026(KINTEX 3홀 A03)의 핑크랩 부스를 MuJoCo 로 옮기고, 그 안에서 이동형 양팔 로봇(PL-2M)이
 손님에게 컵을 가져다 드리고 부스를 안내하는 번외편 저장소입니다. 웹 브라우저 FMS 에서 로봇을 보고, 직접 몰고,
 Nav2 로 보내고, 한국어 문장(LLM)으로 일을 시킵니다.
@@ -61,6 +64,29 @@ cp .env.example .env                         # OPENAI_API_KEY 입력 (LLM 지령
 강좌 패키지에서 고친 점: 브리지가 부스를 합쳐 넣음(`mjcf_world: robotworld`), 원기둥 물체, 스테이션을 테이블 가장자리 · 방향 · 높이로
 정의(어느 방향 테이블이든 도킹 · 집기 · 놓기), 상자 대신 컵 · 부스 장소 · 부스 안내용 LLM 프롬프트, Task Manager 를 launch 에 포함.
 YOLO(torch) 는 쓰지 않고 컵 위치는 시뮬레이터 truth 로 찾습니다.
+
+## 제어 기법 실습 (PID · LQR)
+
+이 fork 에서 더한 실습입니다. ROS 2 없이 MuJoCo Python 만 쓰며, 카트-폴(레일 위 카트 + 경첩 막대) 하나로 세 가지 제어기를 비교합니다.
+
+| 제어기 | 보는 것 | 결과 (기본값, t=4 s 에 3 N 외란) |
+|---|---|---|
+| 각도 PID | 막대 각도 1개 | 막대는 서지만 카트가 0.3 m/s 로 밀려 5.0 s 에 레일 끝에서 넘어짐 |
+| 캐스케이드 PID | 바깥 루프(카트 위치) → 안쪽 루프(각도) | 20 s 에 x = 1.000 m. 이득 5개를 손으로 맞춤 |
+| LQR | 위치 · 각도 · 속도 · 각속도 4개 | 10 s 에 x = 1.000 m. 이득 K 를 비용 Q, R 에서 계산 |
+
+```bash
+source scripts/env.sh                                                        # .venv (mujoco, numpy, scipy)
+python lessons/02_control/pid.py                                            # 각도 PID
+python lessons/02_control/pid.py --kx 0.05 --kv 0.1 --target 1 --seconds 20 # 캐스케이드 PID
+python lessons/02_control/lqr.py                                            # LQR
+python lessons/02_control/lqr.py --viewer                                   # 아무 명령에나 --viewer 를 붙이면 MuJoCo 창
+python lessons/02_control/test_control.py                                   # 자체 점검 → ok
+```
+
+- LQR 은 운동 방정식을 손으로 유도하지 않습니다. `mujoco.mjd_transitionFD` 로 선형화한 A, B 에 `scipy.linalg.solve_discrete_are` 를 써서 K 를 구합니다.
+- 설치 없이 체험: [`lessons/02_control/cartpole_demo.html`](lessons/02_control/cartpole_demo.html) 을 내려받아 브라우저로 엽니다. 슬라이더로 이득을 바꾸고 버튼으로 막대를 밀어 봅니다. 물리는 `cartpole.xml` 수치를 옮긴 근사이며, 넘어지는 시각과 K 가 MuJoCo 결과와 맞습니다.
+- 자세한 설명 · 관찰 포인트 · 해 볼 것: [`lessons/02_control/README.md`](lessons/02_control/README.md)
 
 ## 알려진 한계
 

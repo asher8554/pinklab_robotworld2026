@@ -18,6 +18,7 @@ ROS 2 없이 MuJoCo Python 만 쓴다. 01 의 `mujoco_basics.py` 루프에 제�
 | `pid.py` | `PID` 클래스(약 10줄). 각도 PID, 선택으로 카트 위치 바깥 루프(캐스케이드) |
 | `lqr.py` | `mjd_transitionFD` 로 선형화 → `solve_discrete_are` 로 K → `u = -K(x - x_goal)` |
 | `test_control.py` | 아래 1 · 3 · 4 의 결과가 기대대로인지 확인 |
+| `cartpole_demo.html` | 설치 없이 브라우저에서 이득을 바꿔 보는 체험 페이지 (같은 물리값의 JS 근사) |
 
 ## 실행
 
