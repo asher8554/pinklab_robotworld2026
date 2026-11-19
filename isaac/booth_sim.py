@@ -298,6 +298,12 @@ for name, path in ROBOT_PRIMS.items():
         bind(path, finger)
 for c in CUPS:
     bind(BOOTH_PRIMS[c], cup)
+# 관절 armature (회전자 관성): MuJoCo 빌드(model.py)는 회전 관절 0.01 kg·m², 직선 관절 0.001 kg 을 준다. URDF 변환은 0 이다.
+# 바퀴(관성 1.7e-4)에 armature 가 없으면 PhysX 에서 바퀴 구동과 바닥 마찰이 수렴하지 않아 구동 토크가 감쇠 값과 무관하게
+# 오차의 0.46 배에 묶였다 (멈춤 명령 뒤 56 mm 더 굴러감, MuJoCo 13 mm). 도킹이 3~5 cm 더 들어가 팔이 음료대와 겹쳤다.
+for _prim in Usd.PrimRange(stage.GetPrimAtPath(ROBOT)):
+    if _prim.IsA(UsdPhysics.RevoluteJoint) or _prim.IsA(UsdPhysics.PrismaticJoint):
+        _prim.CreateAttribute("physxJoint:armature", Sdf.ValueTypeNames.Float).Set(0.01 if _prim.IsA(UsdPhysics.RevoluteJoint) else 0.001)
 
 
 def aruco_texture(marker):
