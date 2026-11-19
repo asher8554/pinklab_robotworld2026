@@ -51,8 +51,8 @@ isaac/wsl/robotworld-isaac stop                       # 끝낼 때 (Windows 쪽�
 ```
 
 - 시작 위치는 양쪽을 같게 준다. `booth_sim.py --spawn drinks` 와 `robotworld-isaac start spawn:=drinks`.
-- 그 밖의 명령은 MuJoCo 래퍼와 같다. `drive` (Nav2 · MoveIt 없이), `slam`, `moveit`, `goal`, `arm`, `teleop`, `fms`. 이 중 `slam` · `teleop` · `fms` 는 아직 돌려 보지 않았다.
-- 실습 클라이언트(`lessons/*`)는 `robotworld-isaac exec python3 lessons/...` 로 같은 도메인에서 돌린다 (확인하지 않았다).
+- 그 밖의 명령은 MuJoCo 래퍼와 같다. `drive` (Nav2 · MoveIt 없이), `slam`, `moveit`, `goal`, `arm`, `teleop`, `fms`. 이 중 `slam` · `teleop` 은 돌려 보지 않았다.
+- 실습 클라이언트(`lessons/*`)는 `robotworld-isaac exec python3 lessons/...` 로 같은 도메인에서 돌린다 (`lessons/08_lmm/07_run_plan.py` 확인).
 - `booth_sim.py --help` 에 카메라 · 렌더 옵션의 기본값을 고른 이유를 적었다.
 
 ## 점검
@@ -69,15 +69,17 @@ ROBOTWORLD_ISAAC_DOMAIN_ID=77 isaac/wsl/robotworld-isaac exec python3 isaac/test
 
 | 항목 | 결과 |
 | --- | --- |
-| 자체 점검 | PASS, 실시간 0.60배 (카메라 2대 640x480 · 10 FPS) |
-| 주행 오도메트리 | 직진 실제 0.834 m / odom 0.834 m, 회전 실제 108.7° / odom 110.6° |
-| 도킹 (ArUco) | 측면 잔차 +0.003 m (음료대), +0.012 m (consult_2) |
-| 운반 `pick pink drinks consult_2` (홈 출발) | 성공, 컵을 슬롯에서 1.5 cm 에 세움 |
+| 자체 점검 | PASS, 실시간 0.63배 (카메라 2대 640x480 · 10 FPS) |
+| 주행 오도메트리 | 직진 실제 0.839 m / odom 0.840 m, 회전 실제 121.7° / odom 121.8° |
+| 정지 거리 (0.1 m/s 에서 정지) | 14.7 mm (MuJoCo 13 mm) |
+| 운반 `pick pink drinks consult_2` (홈 출발) | 5회 중 5회 성공, 슬롯 오차 0.1~4.0 cm |
+| Task Manager `07_run_plan.py navigate:drinks pick:cup_pink@drinks navigate:consult_2 place:@consult_2` | 성공 4/4 단계 |
+| 웹 FMS | 지도 · 카메라 MJPEG · 장소 목표 이동 확인 (LLM 채팅 제외) |
 
 ## MuJoCo 와 다른 점 · 제약
 
 - **느리다.** 실시간 약 0.6배다. MoveIt 의 실행 시간 감시는 벽시계로 재므로 launch 에서 허용 배율을 4로 올렸다.
 - **카메라는 경로 추적 + DLSS 다.** 영상마다 물리를 멈추고 같은 자세로 6번 더 그린다 (`--camera-subframes`). 끄면 회전 직후 마커 방향이 약 7° 늦어 도킹이 빗나간다.
-- **PhysX 맞춤.** 물리는 CPU 로 돈다 (GPU 에서는 운반 중 쥔 컵이 튀어 나갔다). 바퀴 접촉은 구, 손가락 joint2 는 mimic 대신 따로 구동, 팔 링크 중력은 끈다 (MuJoCo 중력 보상과 같은 효과). 오도메트리 속도는 0.1 s 로 평활한다.
+- **PhysX 맞춤.** 물리는 CPU 로 돈다 (GPU 에서는 운반 중 쥔 컵이 튀어 나갔다). 바퀴 접촉은 구, 손가락 joint2 는 mimic 대신 따로 구동, 팔 링크 중력은 끈다 (MuJoCo 중력 보상과 같은 효과). 관절 armature 는 MuJoCo 빌드와 같게 준다 (없으면 바퀴가 제동되지 않는다). 오도메트리 속도는 0.1 s 로 평활한다.
 - **부스 그림.** MJCF 변환기가 PNG 텍스처와 조명을 옮기지 않는다. ArUco 마커만 원본 PNG 로 다시 붙였고 나머지는 단색이다.
-- **없는 것.** 사람은 움직이지 않고 `/warehouse/actor_states` 가 없다. `/vision/detections` (정답 검출기) 가 없어 물체 검출이 필요한 Task Manager · LLM 단계와 FMS 는 쓸 수 없거나 확인하지 않았다.
+- **없는 것.** 사람은 움직이지 않고 `/warehouse/actor_states` 가 없다. `/vision/detections` (정답 검출기) 가 없어 `detect` 단계는 쓸 수 없다 (부스 계획은 쓰지 않는다). LLM 을 부르는 `report` · `answer` · 자연어 입력은 확인하지 않았다.
