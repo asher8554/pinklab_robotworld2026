@@ -51,7 +51,7 @@ isaac/wsl/robotworld-isaac stop                       # 끝낼 때 (Windows 쪽�
 ```
 
 - 시작 위치는 양쪽을 같게 준다. `booth_sim.py --spawn drinks` 와 `robotworld-isaac start spawn:=drinks`.
-- 그 밖의 명령은 MuJoCo 래퍼와 같다. `drive` (Nav2 · MoveIt 없이), `slam`, `moveit`, `goal`, `arm`, `teleop`, `fms`. 이 중 `slam` · `teleop` 은 돌려 보지 않았다.
+- 그 밖의 명령은 MuJoCo 래퍼와 같다. `drive` (Nav2 · MoveIt 없이), `slam`, `moveit`, `goal`, `arm`, `teleop`, `fms`.
 - 실습 클라이언트(`lessons/*`)는 `robotworld-isaac exec python3 lessons/...` 로 같은 도메인에서 돌린다 (`lessons/08_lmm/07_run_plan.py` 확인).
 - `booth_sim.py --help` 에 카메라 · 렌더 옵션의 기본값을 고른 이유를 적었다.
 
@@ -65,7 +65,7 @@ C:\isaacsim-6.2\python.bat isaac\booth_sim.py --headless --seconds 60   # 자체
 ROBOTWORLD_ISAAC_DOMAIN_ID=77 isaac/wsl/robotworld-isaac exec python3 isaac/test_isaac_physics.py   # ok
 ```
 
-2026-11-18~19 에 headless 로 확인한 결과 (RViz · 창 모드 화면은 확인하지 않았다).
+2026-11-18~22 에 확인한 결과.
 
 | 항목 | 결과 |
 | --- | --- |
@@ -75,6 +75,8 @@ ROBOTWORLD_ISAAC_DOMAIN_ID=77 isaac/wsl/robotworld-isaac exec python3 isaac/test
 | 운반 `pick pink drinks consult_2` (홈 출발) | 5회 중 5회 성공, 슬롯 오차 0.1~4.0 cm |
 | Task Manager `07_run_plan.py navigate:drinks pick:cup_pink@drinks navigate:consult_2 place:@consult_2` | 성공 4/4 단계 |
 | 웹 FMS | 지도 · 카메라 MJPEG · 장소 목표 이동 확인 (LLM 채팅 제외) |
+| `slam` + `teleop` (headless) | teleop 키 입력으로 odom (0.92, 1.08) m 이동, `/map` 645x618 칸 · 0.05 m |
+| 창 모드 Isaac + RViz | 부스 · 로봇 렌더, RViz 에 로봇 모델 · 라이다 · MoveIt 패널 표시 (캡처로 확인) |
 
 ## MuJoCo 와 다른 점 · 제약
 
@@ -82,4 +84,4 @@ ROBOTWORLD_ISAAC_DOMAIN_ID=77 isaac/wsl/robotworld-isaac exec python3 isaac/test
 - **카메라는 경로 추적 + DLSS 다.** 영상마다 물리를 멈추고 같은 자세로 6번 더 그린다 (`--camera-subframes`). 끄면 회전 직후 마커 방향이 약 7° 늦어 도킹이 빗나간다.
 - **PhysX 맞춤.** 물리는 CPU 로 돈다 (GPU 에서는 운반 중 쥔 컵이 튀어 나갔다). 바퀴 접촉은 구, 손가락 joint2 는 mimic 대신 따로 구동, 팔 링크 중력은 끈다 (MuJoCo 중력 보상과 같은 효과). 관절 armature 는 MuJoCo 빌드와 같게 준다 (없으면 바퀴가 제동되지 않는다). 오도메트리 속도는 0.1 s 로 평활한다.
 - **부스 그림.** MJCF 변환기가 PNG 텍스처와 조명을 옮기지 않는다. ArUco 마커만 원본 PNG 로 다시 붙였고 나머지는 단색이다.
-- **없는 것.** 사람은 움직이지 않고 `/warehouse/actor_states` 가 없다. `/vision/detections` (정답 검출기) 가 없어 `detect` 단계는 쓸 수 없다 (부스 계획은 쓰지 않는다). LLM 을 부르는 `report` · `answer` · 자연어 입력은 확인하지 않았다.
+- **없는 것.** 사람은 움직이지 않고 `/warehouse/actor_states` 가 없다. `/vision/detections` (정답 검출기) 가 없어 `detect` 단계는 쓸 수 없다 (부스 계획은 쓰지 않는다). LLM 을 부르는 `report` · `answer` · 자연어 입력은 확인하지 못했다 (2026-11-22 `08_text_mission.py` 실행 시 API 키 만료 401).
