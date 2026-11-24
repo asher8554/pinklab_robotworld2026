@@ -44,8 +44,8 @@ class Locations:
         """(name, distance_m) of the closest location centre; name is None if outside every radius."""
         best, best_d = None, math.inf
         for name, loc in self.locations.items():
-            cx, cy = loc["center"]
-            d = math.hypot(x - cx, y - cy)
+            # base_goal 도 본다: 로봇이 서는 자리가 center 에서 radius 보다 멀어(음료대 1.22 m) 도착해도 '알 수 없음'이 됐다
+            d = min(math.hypot(x - px, y - py) for px, py in (loc["center"], loc.get("base_goal", loc["center"])[:2]))
             if d < best_d:
                 best, best_d = name, d
         if best is not None and best_d > self.locations[best].get("radius", 2.0):
