@@ -19,6 +19,25 @@ unset ROS_LOCALHOST_ONLY ROS_STATIC_PEERS CYCLONEDDS_URI
 export ROS_HOME="$WS/.ros/robotworld_isaac" ROS_LOG_DIR="$WS/.ros/robotworld_isaac/log" PYTHONNOUSERSITE=1
 export ROBOTWORLD_ISAAC_RUN="${ROBOTWORLD_ISAAC_RUN:-$HOME/.cache/robotworld_isaac/run}"
 mkdir -p "$ROS_LOG_DIR" "$ROBOTWORLD_ISAAC_RUN"
+# Fast DDS 를 eth0 으로만: 없으면 lo 의 10.255.255.254 (WSL DNS) 까지 광고해 Windows 가 영상을 VPN · Wi-Fi 로도 보낸다
+ETH0="$(ip -4 -o addr show eth0 2>/dev/null | awk '{sub("/.*","",$4); print $4; exit}')"
+if [[ -n "$ETH0" && -z "${FASTRTPS_DEFAULT_PROFILES_FILE:-}" ]]; then
+  export FASTRTPS_DEFAULT_PROFILES_FILE="$ROBOTWORLD_ISAAC_RUN/fastdds_eth0.xml"
+  cat > "$FASTRTPS_DEFAULT_PROFILES_FILE" <<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor><transport_id>eth0_udp</transport_id><type>UDPv4</type>
+      <interfaceWhiteList><address>$ETH0</address></interfaceWhiteList></transport_descriptor>
+    <transport_descriptor><transport_id>shm</transport_id><type>SHM</type></transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="eth0_only" is_default_profile="true"><rtps>
+    <userTransports><transport_id>shm</transport_id><transport_id>eth0_udp</transport_id></userTransports>
+    <useBuiltinTransports>false</useBuiltinTransports>
+  </rtps></participant>
+</profiles>
+XML
+fi
 EXPORT="${ROBOTWORLD_ISAAC_EXPORT:-$REPO/artifacts/isaac}"
 PY="$(command -v python3)"; ROS2="$(command -v ros2)"
 LAUNCH="$ISAAC_DIR/wsl/booth_isaac.launch.py"
@@ -35,7 +54,7 @@ case "$command" in
   teleop) exec "$PY" "$ROS2" run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p speed:=0.25 -p turn:=0.5 "$@";;
   fms) exec "$PY" "$REPO/fms/server.py" "$@";;
   exec) exec "$@";;
-  env) echo "workspace $WS | export $EXPORT | domain $ROS_DOMAIN_ID | rmw $RMW_IMPLEMENTATION | python $PY";;
+  env) echo "workspace $WS | export $EXPORT | domain $ROS_DOMAIN_ID | rmw $RMW_IMPLEMENTATION | dds ${FASTRTPS_DEFAULT_PROFILES_FILE:-default} | python $PY";;
   stop) # 이 래퍼가 띄운 launch 만 끈다 (MuJoCo 실습 · 다른 세션의 프로세스는 건드리지 않는다). 경로의 + · 공백은 정규식으로 이스케이프
     esc() { printf '%s' "$1" | sed 's/[][\\.*^$+?(){}|]/\\&/g'; }
     pkill -INT -f -- "$(esc "launch $LAUNCH")" || true; sleep 3; pkill -f -- "$(esc "$ISAAC_DIR/wsl/vision_bridge.py")" || true;;

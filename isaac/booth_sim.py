@@ -28,6 +28,33 @@ REPO = HERE.parent
 # SimulationApp 보다 먼저 정해야 한다. Windows Isaac Sim 의 기본 RMW(Zenoh)는 WSL 과 통하지 않는다.
 os.environ["RMW_IMPLEMENTATION"] = "rmw_fastrtps_cpp"
 os.environ["ROS_DOMAIN_ID"] = os.environ.get("ROBOTWORLD_ISAAC_DOMAIN_ID", "45")
+
+
+def _fastdds_wsl_only():
+    """Fast DDS 를 WSL 가상 어댑터로만 보내게 하는 프로필을 쓴다. 없으면 영상이 VPN · Wi-Fi 로도 복제돼 인터넷이 막힌다
+    (2026-11-24 측정: 카메라 2대 10 fps 에서 NordLynx · Wi-Fi 로 각각 약 12 MB/s)."""
+    if os.environ.get("FASTRTPS_DEFAULT_PROFILES_FILE"):
+        return "FASTRTPS_DEFAULT_PROFILES_FILE (사용자 지정)"
+    import psutil
+    ips = [a.address for name, addrs in psutil.net_if_addrs().items() if name.startswith("vEthernet (WSL")
+           for a in addrs if a.family == 2]  # AF_INET
+    if not ips:
+        return "제한 없음 (vEthernet (WSL) 어댑터 없음)"
+    path = Path(os.environ.get("TEMP", HERE)) / "robotworld_isaac_fastdds.xml"
+    path.write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors><transport_descriptor><transport_id>wsl_udp</transport_id><type>UDPv4</type>
+    <interfaceWhiteList><address>{ips[0]}</address></interfaceWhiteList></transport_descriptor></transport_descriptors>
+  <participant profile_name="wsl_only" is_default_profile="true"><rtps>
+    <userTransports><transport_id>wsl_udp</transport_id></userTransports><useBuiltinTransports>false</useBuiltinTransports>
+  </rtps></participant>
+</profiles>
+""", encoding="utf-8")
+    os.environ["FASTRTPS_DEFAULT_PROFILES_FILE"] = str(path)
+    return f"WSL 어댑터만 ({ips[0]})"
+
+
+DDS_IFACE = _fastdds_wsl_only()
 for _name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_name, "1")
 
@@ -623,7 +650,7 @@ for _ in range(3):
     simulation_app.update()
 state["z0"] = float(state["T_w_bl"][2, 3])
 CUPS0 = cups_view.get_world_poses()[0].numpy().copy() if cups_view is not None else None
-say(f"ready | domain {os.environ['ROS_DOMAIN_ID']} | spawn {SPAWN} | {len(DOF)} dofs | cameras {CAMERAS or 'none'} | aruco {MARKERS_DRAWN} | "
+say(f"ready | domain {os.environ['ROS_DOMAIN_ID']} | dds {DDS_IFACE} | spawn {SPAWN} | {len(DOF)} dofs | cameras {CAMERAS or 'none'} | aruco {MARKERS_DRAWN} | "
     f"physics {args.physics_hz:g} Hz | actions left/right_joint_trajectory_controller, left/right_gripper_controller")
 
 # ------------------------------------------------------------------ 7. 메인 루프 (렌더 · 카메라 발행 · 실시간 맞추기)
